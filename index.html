@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <title>PDF Flipbook</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- Load Tailwind CSS for modern styling -->
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         /* Base Styling */
@@ -17,7 +17,7 @@
             overflow: hidden; 
         }
 
-        /* Container for the book, ensuring it takes up the available space */
+        /* Container for the book */
         #holder { 
             position: absolute; 
             top: 64px; 
@@ -29,9 +29,8 @@
             justify-content: center; 
         }
 
-        /* Flipbook container itself (The size is dynamic but we give it a max) */
+        /* Flipbook container */
         #flipbook {
-            /* These dimensions will be overridden by JS, but serve as a max size */
             max-width: 1000px;
             max-height: 700px;
             background: #222; 
@@ -39,7 +38,6 @@
             box-shadow: 0 15px 40px rgba(0,0,0,0.8); 
             overflow: hidden; 
             outline: 1px solid #333;
-            /* Flex layout to center the book within the holder */
             display: flex; 
             justify-content: center; 
             align-items: center;
@@ -61,15 +59,16 @@
             z-index: 100;
             border-radius: 8px;
             font-size: 1.25rem;
+            width: 100%;
+            height: 100%;
         }
 
         /* Canvas style for rendered PDF pages */
-        .page canvas {
-            display: block;
-            margin: 0 auto;
+        .page {
+            /* Ensures canvas elements inside are centered */
+            display: grid;
+            place-items: center;
         }
-
-        /* Custom spinner for loading */
         .spinner {
             border: 4px solid rgba(255, 255, 255, 0.3);
             border-top: 4px solid #4ade80;
@@ -89,10 +88,8 @@
     <!-- Essential Libraries -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/blasten/turn.js/turn.min.js"></script>
-    <!-- PDF.js library to render the PDF document -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script>
-        // Set the path to the worker script for pdf.js
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
     </script>
 </head>
@@ -104,11 +101,11 @@
             Prev
         </button>
         <div class="text-lg font-mono">
-            <span id="pageNum">1</span> / <span id="pageCount">?</span>
+            <span id="pageNum">Loading</span> / <span id="pageCount">?</span>
         </div>
         <button id="next" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg transition duration-200 shadow-md flex items-center gap-2">
             Next
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H5m12 1h-8a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2V8a2 2 0 00-2-2z"></path></svg>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H5m12 1h-8a2 2 0 00-2-2V8a2 2 0 002-2h8a2 2 0 002 2v8a2 2 0 00-2 2z"></path></svg>
         </button>
     </div>
 
@@ -124,64 +121,72 @@
         </div>
     </div>
 
-    <!-- Audio for Page Turn (Working as per your feedback!) -->
+    <!-- Audio for Page Turn -->
     <audio id="flipSound" preload="auto">
         <source src="page-turn.mp3" type="audio/mpeg">
     </audio>
 
 <script>
     // --- Configuration ---
+    // The path to your PDF file
+    // IMPORTANT: Keep 'book.pdf' all lowercase in your repository!
     const PDF_URL = 'book.pdf'; 
+    
     const MAX_BOOK_WIDTH = 1000;
     const MAX_BOOK_HEIGHT = 700;
     const flipSound = document.getElementById("flipSound");
     let pdfDoc = null;
     let totalPages = 0;
     const $fb = $("#flipbook");
+    let BOOK_W, BOOK_H, PAGE_W, PAGE_H;
 
-    // --- Utility Functions ---
 
-    /**
-     * Renders a single PDF page onto a canvas and returns the canvas element.
-     * @param {number} pageNum - The page number to render (1-based).
-     * @param {number} width - The required width of the canvas.
-     * @param {number} height - The required height of the canvas.
-     * @returns {Promise<HTMLCanvasElement>} The rendered canvas element.
-     */
-    async function renderPageToCanvas(pageNum, width, height) {
-        if (!pdfDoc) throw new Error("PDF Document not loaded.");
-
-        const page = await pdfDoc.getPage(pageNum);
-        const desiredHeight = height; 
-        
-        // Calculate scale needed to fit the desired height
-        const viewport = page.getViewport({ scale: 1 });
-        const scale = desiredHeight / viewport.height;
-        const scaledViewport = page.getViewport({ scale: scale });
-
-        // Create canvas and context
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.height = scaledViewport.height;
-        canvas.width = scaledViewport.width;
-
-        // Render PDF page into canvas context
-        const renderContext = {
-            canvasContext: context,
-            viewport: scaledViewport
-        };
-        await page.render(renderContext).promise;
-        return canvas;
-    }
-
-    /**
-     * Updates the loading progress message.
-     * @param {string} message 
-     */
     function updateLoading(message) {
         document.getElementById('loading-progress').textContent = message;
     }
 
+    // Creates the HTML wrapper for a page, which turn.js expects
+    function createPageWrapper(width, height) {
+        const div = document.createElement("div");
+        div.className = "page bg-white shadow-inner";
+        div.style.width = width + "px";
+        div.style.height = height + "px";
+        return div;
+    }
+
+    // Renders a single PDF page onto a canvas
+    async function renderPageToCanvas(pageNum, canvasContainer) {
+        if (!pdfDoc) return;
+        
+        try {
+            const page = await pdfDoc.getPage(pageNum);
+            // Calculate scale to fit the page height
+            const viewport = page.getViewport({ scale: 1 });
+            const scale = PAGE_H / viewport.height;
+            const scaledViewport = page.getViewport({ scale: scale });
+
+            // Create and append canvas
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.height = scaledViewport.height;
+            canvas.width = scaledViewport.width;
+            
+            // Clear existing content and append new canvas
+            canvasContainer.innerHTML = '';
+            canvasContainer.appendChild(canvas);
+
+            // Render
+            const renderContext = {
+                canvasContext: context,
+                viewport: scaledViewport
+            };
+            await page.render(renderContext).promise;
+
+        } catch (error) {
+            console.error(`Error rendering PDF page ${pageNum}:`, error);
+            canvasContainer.innerHTML = `<div class="text-red-500 text-center p-4">Page ${pageNum} failed to load.</div>`;
+        }
+    }
 
     /**
      * Core function to load the PDF, render all pages, and initialize turn.js.
@@ -203,26 +208,23 @@
             pdfDoc = await loadingTask.promise;
             totalPages = pdfDoc.numPages;
             document.getElementById("pageCount").textContent = totalPages;
+            document.getElementById("pageNum").textContent = 1;
 
             updateLoading('PDF downloaded. Calculating dimensions...');
 
-            // 2. Determine Page Dimensions from the first page
-            const firstPage = await pdfDoc.getPage(1);
-            const viewport = firstPage.getViewport({ scale: 1.0 });
+            // 2. Determine Page Dimensions
+            const page1 = await pdfDoc.getPage(1);
+            const viewport = page1.getViewport({ scale: 1.0 });
 
-            // Calculate book dimensions based on the PDF's aspect ratio
             const pdfAspectRatio = viewport.width / viewport.height;
             
-            let BOOK_H = MAX_BOOK_HEIGHT;
-            let PAGE_H = BOOK_H;
-            
-            // Single page width based on height and aspect ratio
-            let PAGE_W = Math.floor(PAGE_H * pdfAspectRatio);
-            
-            // Total book width (two pages)
-            let BOOK_W = PAGE_W * 2;
+            // Calculate sizes based on Max Height
+            BOOK_H = MAX_BOOK_HEIGHT;
+            PAGE_H = BOOK_H;
+            PAGE_W = Math.floor(PAGE_H * pdfAspectRatio);
+            BOOK_W = PAGE_W * 2;
 
-            // Constrain to maximums
+            // Constrain by Max Width if necessary
             if (BOOK_W > MAX_BOOK_WIDTH) {
                 BOOK_W = MAX_BOOK_WIDTH;
                 PAGE_W = Math.floor(BOOK_W / 2);
@@ -234,7 +236,7 @@
             $fb.css({ width: BOOK_W + 'px', height: BOOK_H + 'px' });
 
 
-            // 3. Initialize turn.js with calculated dimensions
+            // 3. Initialize turn.js
             $fb.turn({
                 width: BOOK_W,
                 height: BOOK_H,
@@ -242,43 +244,32 @@
                 autoCenter: true,
                 acceleration: true,
                 gradients: true,
-                duration: 700,
-                // Add an empty div for the cover (page 0) to aid initialization
-                when: {
-                    missing: async function (e, pages) {
-                        for (let i = 0; i < pages.length; i++) {
-                            const pageNum = pages[i];
-                            if (pageNum >= 1 && pageNum <= totalPages) {
-                                updateLoading(`Rendering page ${pageNum} of ${totalPages}...`);
-                                
-                                const canvas = await renderPageToCanvas(pageNum, PAGE_W, PAGE_H);
-                                
-                                const div = document.createElement("div");
-                                div.className = "page bg-white";
-                                div.style.width = PAGE_W + "px";
-                                div.style.height = PAGE_H + "px";
-                                div.appendChild(canvas);
-                                
-                                $fb.turn("addPage", div, pageNum);
-                            }
-                        }
-                        return false; 
-                    }
-                }
+                duration: 700
             });
 
-            // 4. Manually add first pages to trigger initial rendering
-            // Add a blank cover page (Page 0)
-            const coverDiv = document.createElement("div");
-            coverDiv.className = "page bg-zinc-900 border-r border-gray-700 grid place-content-center text-xl text-white";
-            coverDiv.style.width = PAGE_W + "px";
-            coverDiv.style.height = PAGE_H + "px";
-            coverDiv.textContent = "Book Cover";
-            $fb.turn("addPage", coverDiv, 0); 
+            // 4. Manually Add All Pages (empty wrappers first)
+            updateLoading('Adding page wrappers...');
             
-            // The missing handler will take care of page 1 and 2
+            // Add a blank cover page (Page 0)
+            const coverDiv = createPageWrapper(PAGE_W, PAGE_H);
+            coverDiv.classList.add('bg-zinc-900', 'border-r', 'border-gray-700', 'text-xl', 'text-white');
+            coverDiv.textContent = "BOOK COVER";
+            $fb.turn("addPage", coverDiv, 0); 
 
-            // 5. Setup Controls and Event Handlers
+            // Add all PDF pages (empty wrappers)
+            for (let i = 1; i <= totalPages; i++) {
+                const div = createPageWrapper(PAGE_W, PAGE_H);
+                $fb.turn("addPage", div, i);
+            }
+            
+            // 5. Render visible pages immediately (Page 1 and Page 2)
+            updateLoading('Rendering initial pages...');
+            await renderPageToCanvas(1, $fb.turn('page', 1)[0]);
+            if (totalPages > 1) {
+                await renderPageToCanvas(2, $fb.turn('page', 2)[0]);
+            }
+            
+            // 6. Setup Controls and Event Handlers
             $("#prev").on("click", () => { 
                 $fb.turn("previous"); 
                 try { flipSound.currentTime = 0; flipSound.play(); } catch (_) {} 
@@ -289,21 +280,27 @@
                 try { flipSound.currentTime = 0; flipSound.play(); } catch (_) {} 
             });
             
-            $fb.bind("turned", (e, page) => {
-                // Adjust for the cover page (if page is 0, show 1)
-                const displayPage = (page === 0) ? 1 : page;
-                $("#pageNum").text(displayPage);
+            $fb.bind("turned", async (e, page) => {
+                // Update page counter
+                $("#pageNum").text(page);
+
+                // Pre-render the next page that will become visible
+                const nextPage = page + 2;
+                if (nextPage <= totalPages) {
+                    // Turn page wrapper (jQuery object) into DOM element [0]
+                    await renderPageToCanvas(nextPage, $fb.turn('page', nextPage)[0]);
+                }
             });
 
-            // Hide the loading overlay and show the flipbook
+            // Hide the loading overlay
             document.getElementById("loading-overlay").style.display = 'none';
             
         } catch (error) {
-            console.error("Critical error loading flipbook:", error);
+            console.error("CRITICAL ERROR: Failed to load PDF or initialize flipbook.", error);
             document.getElementById("loading-overlay").innerHTML = `
-                <div class="text-xl text-red-500 mb-4">❌ Failed to Load Flipbook</div>
-                <div class="text-sm text-gray-400">Error: Check console for details.</div>
-                <div class="text-sm text-gray-400 mt-2">Make sure <strong>${PDF_URL}</strong> is in the same folder.</div>
+                <div class="text-xl text-red-500 mb-4">❌ Failed to Load PDF Flipbook</div>
+                <div class="text-sm text-gray-400">Error: ${error.name || 'Unknown'} - Check console for details.</div>
+                <div class="text-sm text-gray-400 mt-2">Ensure <strong>book.pdf</strong> is available at your path.</div>
             `;
         }
     }
@@ -314,3 +311,4 @@
 </script>
 </body>
 </html>
+
